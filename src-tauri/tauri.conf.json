@@ -1,0 +1,55 @@
+{
+  "productName": "Torrent Client",
+  "version": "0.1.0",
+  "identifier": "com.reslab.torrent-client",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Torrent Client",
+        "width": 1100,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 500,
+        "resizable": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Andrew A. Chuev",
+    "copyright": "Copyright © 2026 Andrew A. Chuev",
+    "homepage": "https://github.com/andrew-chuev/reslab-torrent-client",
+    "shortDescription": "Lightweight cross-platform BitTorrent client",
+    "longDescription": "A fast and lightweight BitTorrent client built with Rust and Tauri. Supports magnet links, .torrent files, DHT, and system tray integration.",
+    "category": "Utility",
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}

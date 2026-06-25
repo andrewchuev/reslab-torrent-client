@@ -1,0 +1,12 @@
+pre-release-commit-message = "chore: bump version to {{version}}"
+tag-name = "v{{version}}"
+tag-message = "Release v{{version}}"
+push = true
+push-remote = "origin"
+publish = false
+
+[[pre-release-replacements]]
+file = "tauri.conf.json"
+search = '"version": "[^"]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
