@@ -528,6 +528,35 @@
 .drop-icon { font-size: 48px; line-height: 1; }
 .drop-text { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
 
+/* Speed chart */
+.speed-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 6px 10px 4px;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.speed-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.speed-legend-down { color: var(--accent); font-weight: 600; }
+.speed-legend-up   { color: var(--green);  font-weight: 600; }
+
+.speed-chart {
+  display: block;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: visible;
+}
+
 /* Settings dialog */
 .settings-dialog { width: 520px; padding: 0; max-height: 80vh; display: flex; flex-direction: column; }
 

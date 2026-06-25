@@ -8,7 +8,7 @@ import DetailPanel from "./components/DetailPanel";
 import { loadTheme, applyTheme, Theme } from "./lib/theme";
 import "./App.css";
 
-const ZOOM_LEVELS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5];
+const ZOOM_LEVELS = [0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0];
 const DEFAULT_ZOOM_IDX = 3;
 
 type SortField = "name" | "size" | "progress" | "speed" | "status";
@@ -65,7 +65,12 @@ const App: Component = () => {
   const zoomReset = () => setZoomIdx(DEFAULT_ZOOM_IDX);
 
   const applyZoom = () => {
-    (document.documentElement.style as any).zoom = String(zoom());
+    const z = zoom();
+    (document.documentElement.style as any).zoom = String(z);
+    // Compensate height: at zoom != 1, 100vh is in unzoomed px.
+    // Setting height to (100/z)vh ensures the app visually fills the window.
+    const appEl = document.querySelector<HTMLElement>(".app");
+    if (appEl) appEl.style.height = `${(100 / z).toFixed(4)}vh`;
     localStorage.setItem("zoom-idx", String(zoomIdx()));
   };
   applyZoom();
@@ -146,6 +151,7 @@ const App: Component = () => {
   };
 
   onMount(async () => {
+    applyZoom(); // correct .app height after DOM is rendered
     window.addEventListener("keydown", handleKeyDown);
 
     try {
@@ -157,12 +163,12 @@ const App: Component = () => {
       setLoading(false);
     }
 
-    const unlistenStats = await listen<[string, TorrentInfo][]>("torrent-stats", (event) => {
+    const unlistenStats = await listen<TorrentInfo[]>("torrent-stats", (event) => {
       const snapshot = event.payload;
       setTorrents((prev) => {
         const existing = new Map(prev.map((t) => [t.id, t]));
-        return snapshot.map(([id, info]) => {
-          const current = existing.get(id);
+        return snapshot.map((info) => {
+          const current = existing.get(info.id);
           return current ? { ...current, ...info } : info;
         });
       });
@@ -200,9 +206,8 @@ const App: Component = () => {
   const handleAdded = (torrent: TorrentInfo) => {
     setTorrents((prev) => {
       if (prev.some((t) => t.id === torrent.id)) {
-        // Torrent already in the list — select it and show a brief notice
-        setInfoMsg("Already in the list");
-        setTimeout(() => setInfoMsg(""), 3000);
+        setInfoMsg(`"${torrent.name}" is already in the queue`);
+        setTimeout(() => setInfoMsg(""), 4000);
         return prev;
       }
       return [torrent, ...prev];

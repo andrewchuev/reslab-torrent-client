@@ -77,7 +77,7 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                    if let TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } = event {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
                             if w.is_visible().unwrap_or(false) {
@@ -103,7 +103,9 @@ pub fn run() {
                 }
             });
 
-            if start_minimized {
+            // When a .torrent file is being opened at launch, keep the window
+            // visible so the user sees the "already in list" notice if needed.
+            if start_minimized && startup_torrent.is_none() {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
