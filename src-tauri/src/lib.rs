@@ -47,9 +47,11 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.set_focus();
-            }
-            if let Some(path) = argv.iter().skip(1).find(|a| a.to_lowercase().ends_with(".torrent")) {
-                let _ = app.emit("open-torrent-file", path);
+                // Emit directly to the WebView window so the JS listener receives it.
+                // app.emit() targets the Rust event bus; w.emit() targets the webview.
+                if let Some(path) = argv.iter().find(|a| a.to_lowercase().ends_with(".torrent")) {
+                    let _ = w.emit("open-torrent-file", path);
+                }
             }
         }))
         .manage(manager)

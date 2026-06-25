@@ -1,4 +1,5 @@
 import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { listen } from "@tauri-apps/api/event";
 import { getTorrents, addTorrentFile, addTorrentMagnet, pauseTorrent, resumeTorrent, removeTorrent, removeTorrentWithData, TorrentInfo } from "./lib/commands";
 import Toolbar from "./components/Toolbar";
@@ -35,7 +36,7 @@ function torrentSpeed(t: TorrentInfo): number {
 
 const App: Component = () => {
   const [theme, setTheme] = createSignal<Theme>(loadTheme());
-  applyTheme(theme()); // apply immediately before first paint
+  applyTheme(theme());
 
   const toggleTheme = () => {
     const next: Theme = theme() === "dark" ? "light" : "dark";
@@ -43,7 +44,10 @@ const App: Component = () => {
     setTheme(next);
   };
 
-  const [torrents, setTorrents] = createSignal<TorrentInfo[]>([]);
+  // createStore + reconcile: row components are never remounted on stats tick —
+  // only the specific reactive reads that changed trigger a fine-grained DOM update.
+  const [torrents, setTorrents] = createStore<TorrentInfo[]>([]);
+
   const [showSettings, setShowSettings] = createSignal(false);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
@@ -60,8 +64,8 @@ const App: Component = () => {
   );
 
   const zoom = () => ZOOM_LEVELS[zoomIdx()];
-  const zoomIn = () => setZoomIdx((i) => Math.min(i + 1, ZOOM_LEVELS.length - 1));
-  const zoomOut = () => setZoomIdx((i) => Math.max(i - 1, 0));
+  const zoomIn    = () => setZoomIdx(i => Math.min(i + 1, ZOOM_LEVELS.length - 1));
+  const zoomOut   = () => setZoomIdx(i => Math.max(i - 1, 0));
   const zoomReset = () => setZoomIdx(DEFAULT_ZOOM_IDX);
 
   const applyZoom = () => {
@@ -77,7 +81,7 @@ const App: Component = () => {
 
   const handleSort = (field: SortField) => {
     if (sortField() === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      setSortDir(d => d === "asc" ? "desc" : "asc");
     } else {
       setSortField(field);
       setSortDir("asc");
@@ -85,19 +89,19 @@ const App: Component = () => {
   };
 
   const selectedTorrent = createMemo(() =>
-    torrents().find((t) => t.id === selectedId()) ?? null
+    torrents.find(t => t.id === selectedId()) ?? null
   );
 
   const sortedTorrents = createMemo(() => {
-    const list = [...torrents()];
+    const list = [...torrents];
     const dir = sortDir() === "asc" ? 1 : -1;
     const field = sortField();
     list.sort((a, b) => {
       switch (field) {
-        case "name":    return dir * a.name.localeCompare(b.name);
-        case "size":    return dir * (a.size_bytes - b.size_bytes);
-        case "progress":return dir * (torrentProgress(a) - torrentProgress(b));
-        case "speed":   return dir * (torrentSpeed(a) - torrentSpeed(b));
+        case "name":     return dir * a.name.localeCompare(b.name);
+        case "size":     return dir * (a.size_bytes - b.size_bytes);
+        case "progress": return dir * (torrentProgress(a) - torrentProgress(b));
+        case "speed":    return dir * (torrentSpeed(a) - torrentSpeed(b));
         case "status": {
           const oa = STATUS_ORDER[a.state.type] ?? 9;
           const ob = STATUS_ORDER[b.state.type] ?? 9;
@@ -111,10 +115,9 @@ const App: Component = () => {
   const handleKeyDown = async (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
       if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomIn(); applyZoom(); }
-      if (e.key === "-") { e.preventDefault(); zoomOut(); applyZoom(); }
-      if (e.key === "0") { e.preventDefault(); zoomReset(); applyZoom(); }
+      if (e.key === "-")  { e.preventDefault(); zoomOut(); applyZoom(); }
+      if (e.key === "0")  { e.preventDefault(); zoomReset(); applyZoom(); }
 
-      // Ctrl+V when focus is NOT inside a text input → paste magnet/URL
       if (e.key === "v") {
         const tag = (document.activeElement as HTMLElement)?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -133,7 +136,7 @@ const App: Component = () => {
   };
 
   const handleDroppedPaths = async (paths: string[]) => {
-    const torrentPaths = paths.filter((p) => p.toLowerCase().endsWith(".torrent"));
+    const torrentPaths = paths.filter(p => p.toLowerCase().endsWith(".torrent"));
     if (torrentPaths.length === 0) {
       setDropError("Only .torrent files are supported");
       setTimeout(() => setDropError(""), 3000);
@@ -156,33 +159,27 @@ const App: Component = () => {
 
     try {
       const list = await getTorrents();
-      setTorrents(list);
+      setTorrents(reconcile(list, { key: "id", merge: true }));
     } catch (e) {
       console.error("Failed to load torrents:", e);
     } finally {
       setLoading(false);
     }
 
+    // Stats arrive as TorrentInfo[]. reconcile merges by id so existing store
+    // items keep their identity → <For> never remounts rows, only reactive reads
+    // inside the row update (no flickering).
     const unlistenStats = await listen<TorrentInfo[]>("torrent-stats", (event) => {
-      const snapshot = event.payload;
-      setTorrents((prev) => {
-        const existing = new Map(prev.map((t) => [t.id, t]));
-        return snapshot.map((info) => {
-          const current = existing.get(info.id);
-          return current ? { ...current, ...info } : info;
-        });
-      });
+      setTorrents(reconcile(event.payload, { key: "id", merge: true }));
     });
 
     const unlistenEnter = await listen("tauri://drag-enter", () => setDragging(true));
     const unlistenLeave = await listen("tauri://drag-leave", () => setDragging(false));
-    const unlistenDrop = await listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
+    const unlistenDrop  = await listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
       setDragging(false);
       handleDroppedPaths(event.payload.paths);
     });
 
-    // Fired when the app is opened via a .torrent file association (both fresh
-    // launch and single-instance forwarding from a second process).
     const unlistenOpenFile = await listen<string>("open-torrent-file", async (event) => {
       try {
         const torrent = await addTorrentFile(event.payload);
@@ -204,36 +201,35 @@ const App: Component = () => {
   });
 
   const handleAdded = (torrent: TorrentInfo) => {
-    setTorrents((prev) => {
-      if (prev.some((t) => t.id === torrent.id)) {
-        setInfoMsg(`"${torrent.name}" is already in the queue`);
-        setTimeout(() => setInfoMsg(""), 4000);
-        return prev;
-      }
-      return [torrent, ...prev];
-    });
+    if (torrents.some(t => t.id === torrent.id)) {
+      setInfoMsg(`"${torrent.name}" is already in the queue`);
+      setTimeout(() => setInfoMsg(""), 4000);
+    } else {
+      setTorrents(reconcile([torrent, ...torrents], { key: "id", merge: true }));
+    }
     setSelectedId(torrent.id);
   };
 
   const handleUpdate = (id: string, patch: Partial<TorrentInfo>) => {
-    setTorrents((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    const idx = torrents.findIndex(t => t.id === id);
+    if (idx >= 0) setTorrents(idx, patch as any);
   };
 
   const handleRemove = (id: string) => {
-    setTorrents((prev) => prev.filter((t) => t.id !== id));
+    setTorrents(reconcile(torrents.filter(t => t.id !== id), { key: "id", merge: true }));
     if (selectedId() === id) setSelectedId(null);
-    setCheckedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    setCheckedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
   const handleCheck = (id: string, checked: boolean) => {
-    setCheckedIds((prev) => {
+    setCheckedIds(prev => {
       const n = new Set(prev);
       if (checked) n.add(id); else n.delete(id);
       return n;
     });
   };
 
-  const handleSelectAll = () => setCheckedIds(new Set(torrents().map((t) => t.id)));
+  const handleSelectAll   = () => setCheckedIds(new Set(torrents.map(t => t.id)));
   const handleDeselectAll = () => setCheckedIds(new Set<string>());
 
   const handleGroupAction = async (action: "start" | "pause" | "stop" | "remove" | "remove-with-data") => {
@@ -287,7 +283,6 @@ const App: Component = () => {
       </Show>
 
       <div class="main-area">
-        {/* Group action toolbar */}
         <Show when={checkedIds().size > 0}>
           <div class="group-toolbar">
             <span class="group-count">{checkedIds().size} selected</span>
@@ -303,8 +298,7 @@ const App: Component = () => {
           </div>
         </Show>
 
-        {/* Sort bar */}
-        <Show when={torrents().length > 1}>
+        <Show when={torrents.length > 1}>
           <div class="sort-bar">
             <span class="sort-label">Sort:</span>
             <SortBtn field="name" label="Name" />
@@ -359,7 +353,7 @@ const App: Component = () => {
           <span class="statusbar-info">{infoMsg()}</span>
         </Show>
         <Show when={!dropError() && !infoMsg()}>
-          <span>{torrents().length} torrent{torrents().length !== 1 ? "s" : ""}</span>
+          <span>{torrents.length} torrent{torrents.length !== 1 ? "s" : ""}</span>
         </Show>
         <span class="statusbar-spacer" />
         <div class="zoom-controls">
