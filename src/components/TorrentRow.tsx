@@ -1,14 +1,12 @@
 import { Component, Show } from "solid-js";
 import { open } from "@tauri-apps/plugin-shell";
-import { TorrentInfo, TorrentState, pauseTorrent, resumeTorrent, removeTorrent } from "../lib/commands";
+import { TorrentInfo, TorrentState, pauseTorrent, resumeTorrent, removeTorrent, getTorrentDetails } from "../lib/commands";
 import { formatBytes, formatProgress, formatSpeed, formatEta } from "../lib/format";
 
 interface Props {
   torrent: TorrentInfo;
   selected: boolean;
-  checked: boolean;
-  onSelect: () => void;
-  onCheck: (checked: boolean) => void;
+  onSelect: (e: MouseEvent) => void;
   onUpdate: (id: string, patch: Partial<TorrentInfo>) => void;
   onRemove: (id: string) => void;
 }
@@ -82,8 +80,16 @@ const TorrentRow: Component<Props> = (props) => {
     }
   };
 
-  const handleDblClick = () => {
-    open(props.torrent.save_path).catch(console.error);
+  // Fetch a fresh save path rather than trusting the cached torrent.save_path,
+  // which is set once at add time and can be stale for magnet links whose
+  // per-torrent subfolder is only created after metadata resolves.
+  const handleDblClick = async () => {
+    try {
+      const details = await getTorrentDetails(props.torrent.id);
+      await open(details.save_path);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -93,14 +99,6 @@ const TorrentRow: Component<Props> = (props) => {
       onClick={props.onSelect}
       onDblClick={handleDblClick}
     >
-      <div class="torrent-row-checkbox" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={props.checked}
-          onChange={(e) => props.onCheck(e.currentTarget.checked)}
-        />
-      </div>
-
       <div class="torrent-row-main">
         <div class="torrent-name">{props.torrent.name}</div>
         <div class="torrent-meta">

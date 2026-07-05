@@ -1,11 +1,25 @@
 import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { listen } from "@tauri-apps/api/event";
-import { getTorrents, addTorrentFile, addTorrentMagnet, pauseTorrent, resumeTorrent, removeTorrent, removeTorrentWithData, TorrentInfo } from "./lib/commands";
+import {
+  getTorrents,
+  listTorrentMagnet,
+  listTorrentFile,
+  confirmAddTorrent,
+  cancelTorrentListing,
+  pauseTorrent,
+  resumeTorrent,
+  removeTorrent,
+  removeTorrentWithData,
+  TorrentInfo,
+  TorrentListing,
+  TorrentSource,
+} from "./lib/commands";
 import Toolbar from "./components/Toolbar";
 import TorrentRow from "./components/TorrentRow";
 import Settings from "./components/Settings";
 import DetailPanel from "./components/DetailPanel";
+import FileSelectionDialog from "./components/FileSelectionDialog";
 import { loadTheme, applyTheme, Theme } from "./lib/theme";
 import "./App.css";
 
@@ -54,9 +68,19 @@ const App: Component = () => {
   const [dragging, setDragging] = createSignal(false);
   const [dropError, setDropError] = createSignal("");
   const [infoMsg, setInfoMsg] = createSignal("");
-  const [checkedIds, setCheckedIds] = createSignal<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
+  const [lastClickedId, setLastClickedId] = createSignal<string | null>(null);
   const [sortField, setSortField] = createSignal<SortField>("name");
   const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+
+  // Torrent-add pipeline: every source (magnet, .torrent file/URL) is first
+  // "listed" (metadata resolved, no download started) so the user can pick which
+  // files to download in FileSelectionDialog before confirming. Sources are
+  // queued so drag-dropping several .torrent files shows the dialogs one at a time.
+  const [pendingListing, setPendingListing] = createSignal<TorrentListing | null>(null);
+  const [listingBusy, setListingBusy] = createSignal(false);
+  const [listingError, setListingError] = createSignal("");
+  let addQueue: TorrentSource[] = [];
 
   const savedZoom = parseInt(localStorage.getItem("zoom-idx") ?? String(DEFAULT_ZOOM_IDX));
   const [zoomIdx, setZoomIdx] = createSignal(
@@ -112,6 +136,53 @@ const App: Component = () => {
     return list;
   });
 
+  // ── Add pipeline: list → (user picks files in dialog) → confirm ──────────
+
+  const processNext = async () => {
+    const source = addQueue.shift();
+    if (!source) return;
+    setListingBusy(true);
+    setListingError("");
+    try {
+      const listing =
+        source.kind === "magnet" ? await listTorrentMagnet(source.value) : await listTorrentFile(source.path);
+      setPendingListing(listing);
+    } catch (e) {
+      setListingError(String(e));
+    } finally {
+      setListingBusy(false);
+    }
+  };
+
+  const enqueueAdd = (source: TorrentSource) => {
+    addQueue.push(source);
+    if (!pendingListing() && !listingBusy() && !listingError()) {
+      processNext();
+    }
+  };
+
+  const handleConfirmSelection = async (fileIndices: number[]) => {
+    const listing = pendingListing();
+    if (!listing) return;
+    setPendingListing(null);
+    try {
+      const torrent = await confirmAddTorrent(listing.info_hash, fileIndices);
+      handleAdded(torrent);
+    } catch (e) {
+      setDropError(String(e));
+      setTimeout(() => setDropError(""), 4000);
+    }
+    processNext();
+  };
+
+  const handleCancelSelection = () => {
+    const listing = pendingListing();
+    setPendingListing(null);
+    setListingError("");
+    if (listing) cancelTorrentListing(listing.info_hash).catch(() => {});
+    processNext();
+  };
+
   const handleKeyDown = async (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
       if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomIn(); applyZoom(); }
@@ -125,8 +196,7 @@ const App: Component = () => {
         try {
           const text = (await navigator.clipboard.readText()).trim();
           if (text.startsWith("magnet:") || text.startsWith("http://") || text.startsWith("https://")) {
-            const torrent = await addTorrentMagnet(text);
-            handleAdded(torrent);
+            enqueueAdd({ kind: "magnet", value: text });
           }
         } catch {
           // clipboard empty or denied — ignore silently
@@ -135,7 +205,7 @@ const App: Component = () => {
     }
   };
 
-  const handleDroppedPaths = async (paths: string[]) => {
+  const handleDroppedPaths = (paths: string[]) => {
     const torrentPaths = paths.filter(p => p.toLowerCase().endsWith(".torrent"));
     if (torrentPaths.length === 0) {
       setDropError("Only .torrent files are supported");
@@ -143,13 +213,7 @@ const App: Component = () => {
       return;
     }
     for (const path of torrentPaths) {
-      try {
-        const torrent = await addTorrentFile(path);
-        handleAdded(torrent);
-      } catch (e) {
-        setDropError(String(e));
-        setTimeout(() => setDropError(""), 4000);
-      }
+      enqueueAdd({ kind: "file", path });
     }
   };
 
@@ -180,14 +244,8 @@ const App: Component = () => {
       handleDroppedPaths(event.payload.paths);
     });
 
-    const unlistenOpenFile = await listen<string>("open-torrent-file", async (event) => {
-      try {
-        const torrent = await addTorrentFile(event.payload);
-        handleAdded(torrent);
-      } catch (e) {
-        setDropError(String(e));
-        setTimeout(() => setDropError(""), 4000);
-      }
+    const unlistenOpenFile = await listen<string>("open-torrent-file", (event) => {
+      enqueueAdd({ kind: "file", path: event.payload });
     });
 
     onCleanup(() => {
@@ -218,22 +276,44 @@ const App: Component = () => {
   const handleRemove = (id: string) => {
     setTorrents(reconcile(torrents.filter(t => t.id !== id), { key: "id", merge: true }));
     if (selectedId() === id) setSelectedId(null);
-    setCheckedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
-  const handleCheck = (id: string, checked: boolean) => {
-    setCheckedIds(prev => {
-      const n = new Set(prev);
-      if (checked) n.add(id); else n.delete(id);
-      return n;
-    });
+  // Row selection: plain click replaces the selection; Ctrl/Cmd toggles this row
+  // in the existing selection; Shift selects the contiguous range from the last
+  // clicked row (anchor stays put across repeated shift-clicks). The detail panel
+  // always follows whichever row was clicked most recently, regardless of modifier.
+  const handleRowClick = (torrent: TorrentInfo, e: MouseEvent) => {
+    const id = torrent.id;
+    if (e.shiftKey && lastClickedId()) {
+      const ids = sortedTorrents().map(t => t.id);
+      const a = ids.indexOf(lastClickedId()!);
+      const b = ids.indexOf(id);
+      if (a !== -1 && b !== -1) {
+        const [start, end] = a < b ? [a, b] : [b, a];
+        setSelectedIds(new Set(ids.slice(start, end + 1)));
+      } else {
+        setSelectedIds(new Set([id]));
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      setSelectedIds(prev => {
+        const n = new Set(prev);
+        if (n.has(id)) n.delete(id); else n.add(id);
+        return n;
+      });
+      setLastClickedId(id);
+    } else {
+      setSelectedIds(new Set([id]));
+      setLastClickedId(id);
+    }
+    setSelectedId(id);
   };
 
-  const handleSelectAll   = () => setCheckedIds(new Set(torrents.map(t => t.id)));
-  const handleDeselectAll = () => setCheckedIds(new Set<string>());
+  const handleSelectAll   = () => setSelectedIds(new Set(torrents.map(t => t.id)));
+  const handleDeselectAll = () => setSelectedIds(new Set<string>());
 
   const handleGroupAction = async (action: "start" | "pause" | "stop" | "remove" | "remove-with-data") => {
-    const ids = [...checkedIds()];
+    const ids = [...selectedIds()];
     for (const id of ids) {
       try {
         switch (action) {
@@ -259,7 +339,7 @@ const App: Component = () => {
         console.error(e);
       }
     }
-    setCheckedIds(new Set<string>());
+    setSelectedIds(new Set<string>());
   };
 
   const SortBtn: Component<{ field: SortField; label: string }> = (p) => (
@@ -277,26 +357,24 @@ const App: Component = () => {
 
   return (
     <div class="app">
-      <Toolbar onAdded={handleAdded} onOpenSettings={() => setShowSettings(true)} theme={theme()} onToggleTheme={toggleTheme} />
+      <Toolbar onAddSource={enqueueAdd} onOpenSettings={() => setShowSettings(true)} theme={theme()} onToggleTheme={toggleTheme} />
       <Show when={showSettings()}>
         <Settings onClose={() => setShowSettings(false)} />
       </Show>
 
       <div class="main-area">
-        <Show when={checkedIds().size > 0}>
-          <div class="group-toolbar">
-            <span class="group-count">{checkedIds().size} selected</span>
-            <div class="group-toolbar-sep" />
-            <button class="group-btn" onClick={() => handleGroupAction("start")} title="Resume selected">▶ Start</button>
-            <button class="group-btn" onClick={() => handleGroupAction("pause")} title="Pause selected">⏸ Pause</button>
-            <button class="group-btn" onClick={() => handleGroupAction("stop")} title="Stop selected">⏹ Stop</button>
-            <button class="group-btn group-btn-danger" onClick={() => handleGroupAction("remove")} title="Remove selected">✕ Remove</button>
-            <button class="group-btn group-btn-danger" onClick={() => handleGroupAction("remove-with-data")} title="Remove selected and delete files">🗑 Remove + Data</button>
-            <span class="group-toolbar-spacer" />
-            <button class="group-btn" onClick={handleSelectAll}>Select all</button>
-            <button class="group-btn" onClick={handleDeselectAll}>✕ Clear</button>
-          </div>
-        </Show>
+        <div class="group-toolbar">
+          <span class="group-count">{selectedIds().size} selected</span>
+          <div class="group-toolbar-sep" />
+          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("start")} title="Resume selected">▶ Start</button>
+          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("pause")} title="Pause selected">⏸ Pause</button>
+          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("stop")} title="Stop selected">⏹ Stop</button>
+          <button class="group-btn group-btn-danger" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("remove")} title="Remove selected">✕ Remove</button>
+          <button class="group-btn group-btn-danger" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("remove-with-data")} title="Remove selected and delete files">🗑 Remove + Data</button>
+          <span class="group-toolbar-spacer" />
+          <button class="group-btn" disabled={torrents.length === 0} onClick={handleSelectAll}>Select all</button>
+          <button class="group-btn" disabled={selectedIds().size === 0} onClick={handleDeselectAll}>✕ Clear</button>
+        </div>
 
         <Show when={torrents.length > 1}>
           <div class="sort-bar">
@@ -327,10 +405,8 @@ const App: Component = () => {
                 {(torrent) => (
                   <TorrentRow
                     torrent={torrent}
-                    selected={selectedId() === torrent.id}
-                    checked={checkedIds().has(torrent.id)}
-                    onSelect={() => setSelectedId(torrent.id)}
-                    onCheck={(v) => handleCheck(torrent.id, v)}
+                    selected={selectedIds().has(torrent.id)}
+                    onSelect={(e) => handleRowClick(torrent, e)}
                     onUpdate={handleUpdate}
                     onRemove={handleRemove}
                   />
@@ -372,6 +448,16 @@ const App: Component = () => {
             <div class="drop-text">Drop .torrent file to add</div>
           </div>
         </div>
+      </Show>
+
+      <Show when={listingBusy() || pendingListing() !== null || listingError()}>
+        <FileSelectionDialog
+          listing={pendingListing()}
+          loading={listingBusy()}
+          error={listingError()}
+          onConfirm={handleConfirmSelection}
+          onCancel={handleCancelSelection}
+        />
       </Show>
     </div>
   );

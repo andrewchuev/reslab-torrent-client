@@ -129,6 +129,8 @@
 }
 .group-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .group-btn.group-btn-danger:hover { background: rgba(239,68,68,0.12); color: var(--red); }
+.group-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.group-btn:disabled:hover { background: transparent; color: var(--text-secondary); }
 
 /* Torrent list */
 .torrent-list {
@@ -145,29 +147,10 @@
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.1s;
+  user-select: none;
 }
 .torrent-row:hover { background: var(--bg-hover); }
 .torrent-row.selected { background: var(--bg-selected); }
-
-/* Checkbox column */
-.torrent-row-checkbox {
-  display: flex;
-  align-items: center;
-  padding-right: 10px;
-  flex-shrink: 0;
-}
-.torrent-row-checkbox input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: var(--accent);
-  opacity: 0.25;
-  transition: opacity 0.1s;
-}
-.torrent-row:hover .torrent-row-checkbox input[type="checkbox"],
-.torrent-row-checkbox input[type="checkbox"]:checked {
-  opacity: 1;
-}
 
 .torrent-row-main { flex: 1; min-width: 0; }
 
@@ -609,4 +592,70 @@
   display: flex; gap: 8px; justify-content: flex-end;
   padding: 14px 20px; border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+/* File selection dialog (shown when adding a torrent) */
+.file-selection-dialog { width: 560px; }
+
+.file-selection-meta { margin-bottom: 10px; }
+.file-selection-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-selection-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.file-tree {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+}
+
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s;
+}
+.file-tree-row:hover { background: var(--bg-hover); }
+.file-tree-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.file-tree-folder { font-weight: 600; }
+.file-tree-file, .file-tree-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.file-tree-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.file-selection-footer {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 8px;
 }
