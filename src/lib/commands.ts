@@ -33,6 +33,8 @@ export interface FileInfo {
   name: string;
   size: number;
   included: boolean;
+  components: string[];
+  padding: boolean;
 }
 
 export interface PeerInfo {
@@ -45,11 +47,29 @@ export interface PeerInfo {
 export interface TorrentDetails {
   files: FileInfo[];
   peers: PeerInfo[];
+  save_path: string;
 }
 
+export interface TorrentListing {
+  info_hash: string;
+  name: string;
+  output_folder: string;
+  files: FileInfo[];
+}
+
+// A torrent source the user hasn't confirmed adding yet — magnet/URL text or a
+// local .torrent file path. Listed first (list_torrent_magnet/file) so the user
+// can pick which files to download before confirm_add_torrent starts it.
+export type TorrentSource =
+  | { kind: "magnet"; value: string }
+  | { kind: "file"; path: string };
+
 export const getTorrents = () => invoke<TorrentInfo[]>("get_torrents");
-export const addTorrentMagnet = (magnet: string) => invoke<TorrentInfo>("add_torrent_magnet", { magnet });
-export const addTorrentFile = (path: string) => invoke<TorrentInfo>("add_torrent_file", { path });
+export const listTorrentMagnet = (magnet: string) => invoke<TorrentListing>("list_torrent_magnet", { magnet });
+export const listTorrentFile = (path: string) => invoke<TorrentListing>("list_torrent_file", { path });
+export const confirmAddTorrent = (infoHash: string, fileIndices: number[]) =>
+  invoke<TorrentInfo>("confirm_add_torrent", { infoHash, fileIndices });
+export const cancelTorrentListing = (infoHash: string) => invoke<void>("cancel_torrent_listing", { infoHash });
 export const pauseTorrent = (id: string) => invoke<void>("pause_torrent", { id });
 export const resumeTorrent = (id: string) => invoke<void>("resume_torrent", { id });
 export const removeTorrent = (id: string) => invoke<void>("remove_torrent", { id });

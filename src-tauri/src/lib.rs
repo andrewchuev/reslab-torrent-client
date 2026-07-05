@@ -175,12 +175,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::torrent::get_torrents,
-            commands::torrent::add_torrent_magnet,
+            commands::torrent::list_torrent_magnet,
+            commands::torrent::list_torrent_file,
+            commands::torrent::confirm_add_torrent,
+            commands::torrent::cancel_torrent_listing,
             commands::torrent::pause_torrent,
             commands::torrent::resume_torrent,
             commands::torrent::remove_torrent,
             commands::torrent::remove_torrent_with_data,
-            commands::torrent::add_torrent_file,
             commands::torrent::get_torrent_details,
             commands::settings::get_settings,
             commands::settings::save_settings,

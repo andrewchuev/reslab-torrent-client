@@ -65,6 +65,9 @@ pub struct FileInfo {
     pub name: String,
     pub size: u64,
     pub included: bool,
+    /// Path components, e.g. ["folder", "sub", "file.mp4"]; used to group files by folder.
+    pub components: Vec<String>,
+    pub padding: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +82,19 @@ pub struct PeerInfo {
 pub struct TorrentDetails {
     pub files: Vec<FileInfo>,
     pub peers: Vec<PeerInfo>,
+    /// Current output folder, always freshly read (unlike `TorrentInfo::save_path`,
+    /// which is cached at add time and can go stale for magnet links).
+    pub save_path: String,
+}
+
+/// A torrent whose metadata has been resolved but that hasn't been started yet —
+/// the user picks which files to download before it's handed to `confirm_add`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TorrentListing {
+    pub info_hash: String,
+    pub name: String,
+    pub output_folder: String,
+    pub files: Vec<FileInfo>,
 }
 
 /// Inputs needed to derive `TorrentState`, decoupled from librqbit's `TorrentStats`
@@ -203,6 +219,9 @@ pub struct TorrentManager {
     /// for multi-file torrents (e.g. Downloads/TorrentName/). If the user changed the
     /// download dir in Settings, we fall back to an explicit path (no auto-subfolder).
     initial_download_dir: PathBuf,
+    /// Raw `.torrent` bytes for listings awaiting file-selection confirmation, keyed by
+    /// info_hash. Populated by `list_inner`, consumed by `confirm_add`/`cancel_listing`.
+    pending_listings: RwLock<HashMap<String, Vec<u8>>>,
 }
 
 impl TorrentManager {
@@ -263,6 +282,7 @@ impl TorrentManager {
             torrents: Arc::new(RwLock::new(torrents)),
             initial_download_dir: download_dir.clone(),
             download_dir: RwLock::new(download_dir),
+            pending_listings: RwLock::new(HashMap::new()),
         })
     }
 
@@ -289,10 +309,13 @@ impl TorrentManager {
         let torrent_id = entry.torrent_id;
         drop(guard);
 
-        let files = self
+        let details = self
             .api
             .api_torrent_details(librqbit::api::TorrentIdOrHash::Id(torrent_id))
-            .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?
+            .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+
+        let save_path = details.output_folder;
+        let files = details
             .files
             .unwrap_or_default()
             .into_iter()
@@ -300,6 +323,8 @@ impl TorrentManager {
                 name: f.name,
                 size: f.length,
                 included: f.included,
+                components: f.components,
+                padding: f.attributes.padding,
             })
             .collect::<Vec<_>>();
 
@@ -320,10 +345,18 @@ impl TorrentManager {
             })
             .unwrap_or_default();
 
-        Ok(TorrentDetails { files, peers })
+        Ok(TorrentDetails {
+            files,
+            peers,
+            save_path,
+        })
     }
 
-    async fn add_inner(&self, source: AddTorrent<'_>) -> Result<TorrentInfo> {
+    async fn add_inner(
+        &self,
+        source: AddTorrent<'_>,
+        only_files: Option<Vec<usize>>,
+    ) -> Result<TorrentInfo> {
         let current_dir = read_lock(&self.download_dir).clone();
 
         // When current_dir matches the session's initial dir, pass output_folder=None so
@@ -339,6 +372,7 @@ impl TorrentManager {
         let opts = AddTorrentOptions {
             output_folder,
             overwrite: true,
+            only_files,
             ..Default::default()
         };
 
@@ -399,14 +433,93 @@ impl TorrentManager {
         Ok(info)
     }
 
-    pub async fn add_magnet(&self, url: &str) -> Result<TorrentInfo> {
+    pub async fn list_magnet(&self, url: &str) -> Result<TorrentListing> {
         validate_source_url(url)?;
-        self.add_inner(AddTorrent::from_url(url)).await
+        self.list_inner(AddTorrent::from_url(url)).await
     }
 
-    pub async fn add_torrent_file(&self, path: &str) -> Result<TorrentInfo> {
+    pub async fn list_torrent_file(&self, path: &str) -> Result<TorrentListing> {
         let bytes = tokio::fs::read(path).await.map_err(AppError::Io)?;
-        self.add_inner(AddTorrent::from_bytes(bytes)).await
+        self.list_inner(AddTorrent::from_bytes(bytes)).await
+    }
+
+    /// Resolves a torrent's metadata without starting the download, so the caller can
+    /// present a file-selection dialog before `confirm_add` actually starts it.
+    async fn list_inner(&self, source: AddTorrent<'_>) -> Result<TorrentListing> {
+        let opts = AddTorrentOptions {
+            list_only: true,
+            ..Default::default()
+        };
+        let response = self
+            .session
+            .add_torrent(source, Some(opts))
+            .await
+            .map_err(AppError::Other)?;
+
+        let listing = match response {
+            AddTorrentResponse::ListOnly(l) => l,
+            // list_only always yields ListOnly (checked before the AlreadyManaged path);
+            // any duplicate torrent is instead caught by confirm_add -> add_inner.
+            _ => {
+                return Err(AppError::Other(anyhow::anyhow!(
+                    "expected a list-only response"
+                )))
+            }
+        };
+
+        let info_hash = listing.info_hash.as_string();
+        let name = listing
+            .info
+            .name()
+            .map(|n| n.into_owned())
+            .unwrap_or_else(|| "Unknown torrent".to_string());
+        let output_folder = listing.output_folder.to_string_lossy().to_string();
+        let preselected = listing.only_files.as_deref();
+
+        let files = listing
+            .info
+            .iter_file_details()
+            .enumerate()
+            .map(|(idx, d)| {
+                let attrs = d.attrs();
+                FileInfo {
+                    name: d.filename.to_string(),
+                    size: d.len,
+                    included: preselected.map(|o| o.contains(&idx)).unwrap_or(true),
+                    components: d.filename.to_vec(),
+                    padding: attrs.padding,
+                }
+            })
+            .collect();
+
+        write_lock(&self.pending_listings)
+            .insert(info_hash.clone(), listing.torrent_bytes.to_vec());
+
+        Ok(TorrentListing {
+            info_hash,
+            name,
+            output_folder,
+            files,
+        })
+    }
+
+    /// Starts a torrent previously resolved via `list_magnet`/`list_torrent_file`,
+    /// downloading only the given file indices.
+    pub async fn confirm_add(
+        &self,
+        info_hash: &str,
+        file_indices: Vec<usize>,
+    ) -> Result<TorrentInfo> {
+        let bytes = write_lock(&self.pending_listings)
+            .remove(info_hash)
+            .ok_or_else(|| AppError::TorrentNotFound(info_hash.to_string()))?;
+        self.add_inner(AddTorrent::from_bytes(bytes), Some(file_indices))
+            .await
+    }
+
+    /// Discards a pending listing the user didn't confirm, so it doesn't linger in memory.
+    pub fn cancel_listing(&self, info_hash: &str) {
+        write_lock(&self.pending_listings).remove(info_hash);
     }
 
     pub async fn pause(&self, id: &str) -> Result<()> {

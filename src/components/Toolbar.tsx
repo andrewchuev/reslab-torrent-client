@@ -1,10 +1,10 @@
 import { Component, createSignal } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
-import { addTorrentMagnet, addTorrentFile, TorrentInfo } from "../lib/commands";
+import { TorrentSource } from "../lib/commands";
 import { Theme } from "../lib/theme";
 
 interface Props {
-  onAdded: (t: TorrentInfo) => void;
+  onAddSource: (source: TorrentSource) => void;
   onOpenSettings: () => void;
   theme: Theme;
   onToggleTheme: () => void;
@@ -26,7 +26,6 @@ const Toolbar: Component<Props> = (props) => {
   const [showDialog, setShowDialog] = createSignal(false);
   const [magnet, setMagnet] = createSignal("");
   const [error, setError] = createSignal("");
-  const [loading, setLoading] = createSignal(false);
   const [clipLoading, setClipLoading] = createSignal(false);
 
   const openDialog = async () => {
@@ -37,25 +36,18 @@ const Toolbar: Component<Props> = (props) => {
     setShowDialog(true);
   };
 
-  const handleAdd = async () => {
+  const handleAdd = () => {
     const m = magnet().trim();
     if (!m) return;
-    setLoading(true);
-    setError("");
-    try {
-      const torrent = await addTorrentMagnet(m);
-      props.onAdded(torrent);
-      setMagnet("");
-      setShowDialog(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
+    props.onAddSource({ kind: "magnet", value: m });
+    setMagnet("");
+    setShowDialog(false);
   };
 
   const handlePasteAndAdd = async () => {
+    setClipLoading(true);
     const clip = await readClipboard();
+    setClipLoading(false);
     if (!clip) {
       setError("Clipboard is empty");
       return;
@@ -67,18 +59,7 @@ const Toolbar: Component<Props> = (props) => {
       setShowDialog(true);
       return;
     }
-    setClipLoading(true);
-    try {
-      const torrent = await addTorrentMagnet(clip);
-      props.onAdded(torrent);
-    } catch (e) {
-      // Fall back to opening dialog with the clipboard content so user sees the error
-      setMagnet(clip);
-      setError(String(e));
-      setShowDialog(true);
-    } finally {
-      setClipLoading(false);
-    }
+    props.onAddSource({ kind: "magnet", value: clip });
   };
 
   const handleOpenFile = async () => {
@@ -87,16 +68,7 @@ const Toolbar: Component<Props> = (props) => {
       filters: [{ name: "Torrent", extensions: ["torrent"] }],
     });
     if (!path) return;
-    setLoading(true);
-    setError("");
-    try {
-      const torrent = await addTorrentFile(path as string);
-      props.onAdded(torrent);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
+    props.onAddSource({ kind: "file", path: path as string });
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -147,8 +119,8 @@ const Toolbar: Component<Props> = (props) => {
             {error() && <div class="dialog-error">{error()}</div>}
             <div class="dialog-actions">
               <button class="btn-ghost" onClick={() => setShowDialog(false)}>Cancel</button>
-              <button class="btn-primary" onClick={handleAdd} disabled={loading() || !magnet().trim()}>
-                {loading() ? "Adding…" : "Add"}
+              <button class="btn-primary" onClick={handleAdd} disabled={!magnet().trim()}>
+                Add
               </button>
             </div>
           </div>
