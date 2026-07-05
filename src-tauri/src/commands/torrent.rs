@@ -1,6 +1,9 @@
 use tauri::State;
 
-use crate::engine::{manager::{TorrentDetails, TorrentInfo}, TorrentManager};
+use crate::engine::{
+    manager::{TorrentDetails, TorrentInfo},
+    TorrentManager,
+};
 use crate::error::Result;
 
 #[tauri::command]
@@ -32,7 +35,10 @@ pub async fn remove_torrent(id: String, manager: State<'_, TorrentManager>) -> R
 }
 
 #[tauri::command]
-pub async fn remove_torrent_with_data(id: String, manager: State<'_, TorrentManager>) -> Result<()> {
+pub async fn remove_torrent_with_data(
+    id: String,
+    manager: State<'_, TorrentManager>,
+) -> Result<()> {
     manager.remove(&id, true).await
 }
 
@@ -45,6 +51,9 @@ pub async fn add_torrent_file(
 }
 
 #[tauri::command]
-pub fn get_torrent_details(id: String, manager: State<'_, TorrentManager>) -> Result<TorrentDetails> {
+pub fn get_torrent_details(
+    id: String,
+    manager: State<'_, TorrentManager>,
+) -> Result<TorrentDetails> {
     manager.get_details(&id)
 }
