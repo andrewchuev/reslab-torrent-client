@@ -63,8 +63,12 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
+            let icon = app
+                .default_window_icon()
+                .ok_or("default window icon not found")?
+                .clone();
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .tooltip("Torrent Client")
@@ -79,7 +83,11 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } = event {
+                    if let TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
                             if w.is_visible().unwrap_or(false) {
@@ -126,8 +134,7 @@ pub fn run() {
             // ── Background stats + download-complete notifications ─────────
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_secs(1));
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
                 // Track which torrent IDs are already known to be seeding so we
                 // only fire the notification on the first transition.
                 let mut seeding_ids: HashSet<String> = HashSet::new();
@@ -159,8 +166,7 @@ pub fn run() {
                         }
                     }
                     // Forget IDs of removed torrents
-                    let current_ids: HashSet<&str> =
-                        all.iter().map(|i| i.id.as_str()).collect();
+                    let current_ids: HashSet<&str> = all.iter().map(|i| i.id.as_str()).collect();
                     seeding_ids.retain(|id| current_ids.contains(id.as_str()));
                 }
             });
