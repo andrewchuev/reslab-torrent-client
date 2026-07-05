@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, createMemo, on, For, Show } from "solid-js";
+import { Component, createSignal, createEffect, createMemo, on, onMount, onCleanup, For, Show } from "solid-js";
 import { getTorrentDetails, TorrentDetails, TorrentInfo } from "../lib/commands";
 
 interface Props {
@@ -8,6 +8,9 @@ interface Props {
 type Tab = "files" | "speed";
 
 const MAX_POINTS = 60;
+const DEFAULT_PANEL_HEIGHT = 200;
+const MIN_PANEL_HEIGHT = 120;
+const PANEL_HEIGHT_KEY = "detail-panel-height";
 
 interface SpeedPoint {
   down: number;
@@ -26,11 +29,14 @@ function fmtSpeed(bps: number): string {
   return fmtBytes(bps) + "/s";
 }
 
-// SVG chart coordinate constants (viewBox 0 0 400 100)
-const PL = 50, PR = 8, PT = 6, PB = 18;
-const IW = 400 - PL - PR;  // 342  — inner width
-const IH = 100 - PT - PB;  // 76   — inner height
-const BASELINE = PT + IH;  // 82
+// SVG chart margins, in real CSS pixels — the viewBox is set to the chart's
+// actual measured size (see ResizeObserver below), so these are literal pixels,
+// not units scaled by a mismatched viewBox/container aspect ratio.
+const CHART_PL = 44, CHART_PR = 10, CHART_PT = 8, CHART_PB = 20;
+
+function maxWindowPanelHeight(): number {
+  return Math.min(600, window.innerHeight - 250);
+}
 
 const DetailPanel: Component<Props> = (props) => {
   const [tab, setTab] = createSignal<Tab>("files");
@@ -71,6 +77,80 @@ const DetailPanel: Component<Props> = (props) => {
 
   const files = () => details()?.files ?? [];
 
+  // ── Resizable panel height ──────────────────────────────────────────────
+
+  const [panelHeight, setPanelHeight] = createSignal(
+    Math.max(MIN_PANEL_HEIGHT, parseInt(localStorage.getItem(PANEL_HEIGHT_KEY) ?? "", 10) || DEFAULT_PANEL_HEIGHT)
+  );
+
+  let dragStartY = 0;
+  let dragStartHeight = 0;
+  let dragMaxHeight = DEFAULT_PANEL_HEIGHT;
+
+  const clampPanelHeight = (h: number, max: number) => Math.max(MIN_PANEL_HEIGHT, Math.min(h, max));
+
+  const handlePointerMove = (e: PointerEvent) => {
+    // Dragging the handle up (smaller clientY) grows the panel, since it's docked to the bottom.
+    setPanelHeight(clampPanelHeight(dragStartHeight + (dragStartY - e.clientY), dragMaxHeight));
+  };
+
+  const handlePointerUp = () => {
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+    document.body.style.userSelect = "";
+    localStorage.setItem(PANEL_HEIGHT_KEY, String(panelHeight()));
+  };
+
+  const handlePointerDown = (e: PointerEvent) => {
+    dragStartY = e.clientY;
+    dragStartHeight = panelHeight();
+    dragMaxHeight = maxWindowPanelHeight();
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  };
+
+  const handleResetHeight = () => {
+    setPanelHeight(DEFAULT_PANEL_HEIGHT);
+    localStorage.setItem(PANEL_HEIGHT_KEY, String(DEFAULT_PANEL_HEIGHT));
+  };
+
+  // Re-clamp if the window shrinks while the panel is open.
+  onMount(() => {
+    const onWindowResize = () => {
+      const max = maxWindowPanelHeight();
+      setPanelHeight(h => clampPanelHeight(h, max));
+    };
+    window.addEventListener("resize", onWindowResize);
+    onCleanup(() => window.removeEventListener("resize", onWindowResize));
+  });
+
+  // ── Chart: measure the actual rendered size so the SVG viewBox always
+  // matches it exactly — no distortion from a mismatched aspect ratio. ──────
+
+  const [chartWidth, setChartWidth] = createSignal(0);
+  const [chartHeight, setChartHeight] = createSignal(0);
+  let chartObserver: ResizeObserver | undefined;
+
+  // The <svg> only exists in the DOM while the Speed tab is shown (see the
+  // `Show` below), so it's attached via a ref callback rather than onMount —
+  // that fires each time the element (re)mounts, not just once for the panel.
+  const attachChartRef = (el: SVGSVGElement) => {
+    chartObserver?.disconnect();
+    chartObserver = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setChartWidth(rect.width);
+      setChartHeight(rect.height);
+    });
+    chartObserver.observe(el);
+  };
+  onCleanup(() => chartObserver?.disconnect());
+
+  const chartInnerWidth = createMemo(() => Math.max(0, chartWidth() - CHART_PL - CHART_PR));
+  const chartInnerHeight = createMemo(() => Math.max(0, chartHeight() - CHART_PT - CHART_PB));
+  const chartBaseline = createMemo(() => CHART_PT + chartInnerHeight());
+
   // ── Chart computations ────────────────────────────────────────────────────
 
   const maxSpeed = createMemo(() => {
@@ -92,10 +172,12 @@ const DetailPanel: Component<Props> = (props) => {
   const linePoints = (field: "down" | "up") => createMemo(() => {
     const h = speedHistory();
     const max = maxSpeed();
-    if (h.length < 2) return "";
+    const iw = chartInnerWidth();
+    const ih = chartInnerHeight();
+    if (h.length < 2 || iw === 0) return "";
     return h.map((p, i) => {
-      const x = PL + (i / (MAX_POINTS - 1)) * IW;
-      const y = PT + IH - Math.min(1, p[field] / max) * IH;
+      const x = CHART_PL + (i / (MAX_POINTS - 1)) * iw;
+      const y = CHART_PT + ih - Math.min(1, p[field] / max) * ih;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(" ");
   });
@@ -103,15 +185,18 @@ const DetailPanel: Component<Props> = (props) => {
   const areaPoints = (field: "down" | "up") => createMemo(() => {
     const h = speedHistory();
     const max = maxSpeed();
-    if (h.length < 2) return "";
+    const iw = chartInnerWidth();
+    const ih = chartInnerHeight();
+    if (h.length < 2 || iw === 0) return "";
     const body = h.map((p, i) => {
-      const x = PL + (i / (MAX_POINTS - 1)) * IW;
-      const y = PT + IH - Math.min(1, p[field] / max) * IH;
+      const x = CHART_PL + (i / (MAX_POINTS - 1)) * iw;
+      const y = CHART_PT + ih - Math.min(1, p[field] / max) * ih;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
-    const x0 = PL.toFixed(1);
-    const x1 = (PL + ((h.length - 1) / (MAX_POINTS - 1)) * IW).toFixed(1);
-    return `${x0},${BASELINE} ${body.join(" ")} ${x1},${BASELINE}`;
+    const x0 = CHART_PL.toFixed(1);
+    const x1 = (CHART_PL + ((h.length - 1) / (MAX_POINTS - 1)) * iw).toFixed(1);
+    const baseline = chartBaseline().toFixed(1);
+    return `${x0},${baseline} ${body.join(" ")} ${x1},${baseline}`;
   });
 
   const downLine = linePoints("down");
@@ -121,16 +206,25 @@ const DetailPanel: Component<Props> = (props) => {
 
   const yLabels = createMemo(() => {
     const max = maxSpeed();
+    const ih = chartInnerHeight();
     return [0, 0.5, 1.0].map(f => ({
-      y: (PT + IH - f * IH).toFixed(1),
+      y: (CHART_PT + ih - f * ih).toFixed(1),
       label: f === 0 ? "0" : fmtSpeed(max * f),
     }));
   });
 
   const hasData = () => speedHistory().length >= 2;
+  const chartReady = () => chartWidth() > 0 && chartHeight() > 0;
 
   return (
-    <div class="detail-panel">
+    <div class="detail-panel" style={{ height: `${panelHeight()}px` }}>
+      <div
+        class="detail-resize-handle"
+        onPointerDown={handlePointerDown}
+        onDblClick={handleResetHeight}
+        title="Drag to resize, double-click to reset"
+      />
+
       <div class="detail-tabs">
         <button
           class={`detail-tab${tab() === "files" ? " active" : ""}`}
@@ -211,61 +305,61 @@ const DetailPanel: Component<Props> = (props) => {
                 <span class="speed-legend-up">↑ {fmtSpeed(currentUp())}</span>
               </div>
 
-              <svg viewBox="0 0 400 100" class="speed-chart" preserveAspectRatio="none">
-                {/* Y-axis grid + labels */}
-                <For each={yLabels()}>
-                  {(l) => (
-                    <g>
-                      <line
-                        x1={PL} y1={l.y}
-                        x2={400 - PR} y2={l.y}
-                        stroke="var(--border)" stroke-width="0.5"
-                      />
-                      <text
-                        x={PL - 3} y={parseFloat(l.y) + 2.5}
-                        text-anchor="end" font-size="6.5"
-                        fill="var(--text-muted)"
-                      >{l.label}</text>
-                    </g>
-                  )}
-                </For>
+              <svg ref={attachChartRef} viewBox={`0 0 ${Math.max(chartWidth(), 1)} ${Math.max(chartHeight(), 1)}`} class="speed-chart">
+                <Show when={chartReady()}>
+                  {/* Y-axis grid + labels */}
+                  <For each={yLabels()}>
+                    {(l) => (
+                      <g>
+                        <line
+                          x1={CHART_PL} y1={l.y}
+                          x2={chartWidth() - CHART_PR} y2={l.y}
+                          stroke="var(--border)" stroke-width="1"
+                        />
+                        <text
+                          x={CHART_PL - 4} y={parseFloat(l.y) + 3}
+                          text-anchor="end" font-size="10"
+                          fill="var(--text-muted)"
+                        >{l.label}</text>
+                      </g>
+                    )}
+                  </For>
 
-                {/* X-axis baseline */}
-                <line
-                  x1={PL} y1={BASELINE}
-                  x2={400 - PR} y2={BASELINE}
-                  stroke="var(--border)" stroke-width="0.8"
-                />
-
-                <Show when={hasData()}>
-                  {/* Area fills */}
-                  <polygon points={downArea()} fill="var(--accent)" opacity="0.1" />
-                  <polygon points={upArea()}   fill="var(--green)"  opacity="0.1" />
-                  {/* Lines */}
-                  <polyline
-                    points={downLine()}
-                    fill="none" stroke="var(--accent)" stroke-width="1.2"
-                    stroke-linejoin="round" stroke-linecap="round"
-                    vector-effect="non-scaling-stroke"
+                  {/* X-axis baseline */}
+                  <line
+                    x1={CHART_PL} y1={chartBaseline()}
+                    x2={chartWidth() - CHART_PR} y2={chartBaseline()}
+                    stroke="var(--border)" stroke-width="1"
                   />
-                  <polyline
-                    points={upLine()}
-                    fill="none" stroke="var(--green)" stroke-width="1.2"
-                    stroke-linejoin="round" stroke-linecap="round"
-                    vector-effect="non-scaling-stroke"
-                  />
-                </Show>
 
-                <Show when={!hasData()}>
-                  <text x="200" y="55" text-anchor="middle" font-size="9" fill="var(--text-muted)">
-                    Collecting data…
+                  <Show when={hasData()}>
+                    {/* Area fills */}
+                    <polygon points={downArea()} fill="var(--accent)" opacity="0.1" />
+                    <polygon points={upArea()}   fill="var(--green)"  opacity="0.1" />
+                    {/* Lines */}
+                    <polyline
+                      points={downLine()}
+                      fill="none" stroke="var(--accent)" stroke-width="1.5"
+                      stroke-linejoin="round" stroke-linecap="round"
+                    />
+                    <polyline
+                      points={upLine()}
+                      fill="none" stroke="var(--green)" stroke-width="1.5"
+                      stroke-linejoin="round" stroke-linecap="round"
+                    />
+                  </Show>
+
+                  <Show when={!hasData()}>
+                    <text x={chartWidth() / 2} y={chartHeight() / 2} text-anchor="middle" font-size="11" fill="var(--text-muted)">
+                      Collecting data…
+                    </text>
+                  </Show>
+
+                  {/* X label */}
+                  <text x={CHART_PL + chartInnerWidth() / 2} y={chartHeight() - 4} text-anchor="middle" font-size="10" fill="var(--text-muted)">
+                    last 60 s
                   </text>
                 </Show>
-
-                {/* X label */}
-                <text x={PL + IW / 2} y="98" text-anchor="middle" font-size="6.5" fill="var(--text-muted)">
-                  last 60 s
-                </text>
               </svg>
             </div>
           </Show>

@@ -361,12 +361,36 @@
 /* Detail panel */
 .detail-panel {
   flex-shrink: 0;
-  height: 200px;
   border-top: 2px solid var(--accent);
   display: flex;
   flex-direction: column;
   background: var(--bg-base);
+  position: relative;
 }
+
+.detail-resize-handle {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 1;
+  touch-action: none;
+}
+.detail-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.1s;
+}
+.detail-resize-handle:hover::after { background: var(--accent); }
 
 .detail-tabs {
   display: flex;
@@ -616,6 +640,7 @@
 .file-tree {
   max-height: 320px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 0;
@@ -655,7 +680,12 @@
 }
 
 .file-selection-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-secondary);
   margin-top: 8px;
 }
+
+.file-selection-footer-spacer { flex: 1; }
