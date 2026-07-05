@@ -95,6 +95,14 @@ const FileSelectionDialog: Component<Props> = (props) => {
     });
   };
 
+  const checkAll = () => {
+    const listing = props.listing;
+    if (!listing) return;
+    setSelected(new Set(listing.files.flatMap((f, i) => (f.padding ? [] : [i]))));
+  };
+
+  const uncheckAll = () => setSelected(new Set<number>());
+
   const nodeState = (node: TreeNode, sel: Set<number>): "all" | "none" | "some" => {
     const indices = collectIndices(node);
     const selectedCount = indices.filter((i) => sel.has(i)).length;
@@ -166,6 +174,9 @@ const FileSelectionDialog: Component<Props> = (props) => {
                 <span>
                   {selected().size} of {selectableCount()} files selected · {fmtBytes(totalSize())}
                 </span>
+                <span class="file-selection-footer-spacer" />
+                <button class="group-btn" onClick={checkAll}>Check All</button>
+                <button class="group-btn" onClick={uncheckAll}>Uncheck All</button>
               </div>
               <div class="dialog-actions">
                 <button class="btn-ghost" onClick={props.onCancel}>Cancel</button>
