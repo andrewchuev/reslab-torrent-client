@@ -2,6 +2,8 @@
 
 A lightweight, cross-platform BitTorrent client built with **Rust + Tauri 2** and a **SolidJS** frontend.
 
+[![Download](https://img.shields.io/github/v/release/andrewchuev/reslab-torrent-client?label=Download&style=for-the-badge&color=2563eb&labelColor=333333)](https://github.com/andrewchuev/reslab-torrent-client/releases/latest)
+
 ---
 
 ## Features
