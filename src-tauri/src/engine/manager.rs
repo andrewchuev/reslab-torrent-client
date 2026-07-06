@@ -504,16 +504,21 @@ impl TorrentManager {
     }
 
     /// Starts a torrent previously resolved via `list_magnet`/`list_torrent_file`,
-    /// downloading only the given file indices.
+    /// downloading only the given file indices. `None` means "everything" — kept
+    /// distinct from `Some(all_indices)`, which takes librqbit down a restricted-set
+    /// code path that doesn't survive a session restore (every file ends up with no
+    /// backing storage handle and the restored torrent is dropped; see FsFileIsNone
+    /// in librqbit's logs). The frontend already omits the indices entirely when the
+    /// user hasn't excluded anything, matching librqbit's own web UI convention.
     pub async fn confirm_add(
         &self,
         info_hash: &str,
-        file_indices: Vec<usize>,
+        file_indices: Option<Vec<usize>>,
     ) -> Result<TorrentInfo> {
         let bytes = write_lock(&self.pending_listings)
             .remove(info_hash)
             .ok_or_else(|| AppError::TorrentNotFound(info_hash.to_string()))?;
-        self.add_inner(AddTorrent::from_bytes(bytes), Some(file_indices))
+        self.add_inner(AddTorrent::from_bytes(bytes), file_indices)
             .await
     }
 

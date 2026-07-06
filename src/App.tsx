@@ -161,7 +161,7 @@ const App: Component = () => {
     }
   };
 
-  const handleConfirmSelection = async (fileIndices: number[]) => {
+  const handleConfirmSelection = async (fileIndices: number[] | null) => {
     const listing = pendingListing();
     if (!listing) return;
     setPendingListing(null);

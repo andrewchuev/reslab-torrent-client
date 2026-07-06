@@ -30,7 +30,7 @@ pub async fn list_torrent_file(
 #[tauri::command]
 pub async fn confirm_add_torrent(
     info_hash: String,
-    file_indices: Vec<usize>,
+    file_indices: Option<Vec<usize>>,
     manager: State<'_, TorrentManager>,
 ) -> Result<TorrentInfo> {
     manager.confirm_add(&info_hash, file_indices).await

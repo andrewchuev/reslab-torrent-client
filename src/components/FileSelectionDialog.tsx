@@ -5,7 +5,7 @@ interface Props {
   listing: TorrentListing | null;
   loading: boolean;
   error: string;
-  onConfirm: (fileIndices: number[]) => void;
+  onConfirm: (fileIndices: number[] | null) => void;
   onCancel: () => void;
 }
 
@@ -183,7 +183,10 @@ const FileSelectionDialog: Component<Props> = (props) => {
                 <button
                   class="btn-primary"
                   disabled={selected().size === 0}
-                  onClick={() => props.onConfirm([...selected()])}
+                  // Pass null (not every index) when nothing was excluded — librqbit
+                  // treats an explicit "all files" list differently from "no restriction"
+                  // and only the latter survives a session restore correctly.
+                  onClick={() => props.onConfirm(selected().size === selectableCount() ? null : [...selected()])}
                 >
                   Add
                 </button>

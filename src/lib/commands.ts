@@ -67,7 +67,9 @@ export type TorrentSource =
 export const getTorrents = () => invoke<TorrentInfo[]>("get_torrents");
 export const listTorrentMagnet = (magnet: string) => invoke<TorrentListing>("list_torrent_magnet", { magnet });
 export const listTorrentFile = (path: string) => invoke<TorrentListing>("list_torrent_file", { path });
-export const confirmAddTorrent = (infoHash: string, fileIndices: number[]) =>
+// fileIndices: null means "download everything" — kept distinct from an explicit
+// list of every index, since librqbit treats those differently (see FileSelectionDialog).
+export const confirmAddTorrent = (infoHash: string, fileIndices: number[] | null) =>
   invoke<TorrentInfo>("confirm_add_torrent", { infoHash, fileIndices });
 export const cancelTorrentListing = (infoHash: string) => invoke<void>("cancel_torrent_listing", { infoHash });
 export const pauseTorrent = (id: string) => invoke<void>("pause_torrent", { id });
