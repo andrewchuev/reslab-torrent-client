@@ -6,13 +6,15 @@ A lightweight, cross-platform BitTorrent client built with **Rust + Tauri 2** an
 
 ## Features
 
-- **Magnet links & .torrent files** — add torrents by URL, file picker, drag & drop, or paste from clipboard
-- **Real-time stats** — download/upload speed, progress, and peer count updated every second
-- **Detail panel** — per-file progress bars and active peer list for the selected torrent
-- **System tray** — runs in the background; hide to tray on close, re-open with a click
+- **Magnet links & .torrent files** — add torrents by URL, file picker, drag & drop, or paste from clipboard (`Ctrl+V` global shortcut)
+- **Choose what to download** — every add resolves the torrent's metadata first and shows a file/folder tree so you can pick exactly what to grab, with per-folder toggling and Check All / Uncheck All
+- **Real-time stats** — download/upload speed, progress, and peer count updated every second, with a live speed chart
+- **Resizable detail panel** — drag to resize, per-file progress bars, active peer list, and the speed chart for the selected torrent
+- **Multi-select** — Shift/Ctrl+click to select multiple torrents; bulk start/pause/stop/remove actions always available
+- **System tray** — runs in the background; hide to tray on close, re-open with a click or tray icon double-click
 - **Download-complete notifications** — desktop notification when a torrent finishes
 - **Settings** — configurable download folder, speed limits, and startup behavior (persisted to TOML)
-- **Sort & zoom** — sort by name, status, progress, speed or size; UI zoom via Ctrl +/−/0
+- **Sort, zoom & theme** — sort by name, status, progress, speed or size; UI zoom via Ctrl +/−/0; dark/light theme toggle
 - **DHT** — decentralised peer discovery, no tracker required for magnet links
 
 ---
@@ -108,12 +110,16 @@ The workflow produces a Draft GitHub Release with all platform installers attach
 ```
 reslab-torrent-client/
 ├── src/                        # SolidJS frontend
-│   ├── App.tsx                 # Root component, layout, drag-drop, sorting
-│   ├── lib/commands.ts         # Typed Tauri IPC wrappers
+│   ├── App.tsx                 # Root component, layout, drag-drop, sorting, add-torrent pipeline
+│   ├── lib/
+│   │   ├── commands.ts         # Typed Tauri IPC wrappers
+│   │   ├── theme.ts            # Dark/light theme persistence
+│   │   └── format.ts           # Byte size / speed / ETA formatting helpers
 │   └── components/
 │       ├── Toolbar.tsx         # Add torrent, open file, paste link
 │       ├── TorrentRow.tsx      # Single torrent list item
-│       ├── DetailPanel.tsx     # Files + peers for selected torrent
+│       ├── DetailPanel.tsx     # Resizable panel: per-file progress, peers, speed chart
+│       ├── FileSelectionDialog.tsx  # Pick files/folders before a torrent starts downloading
 │       └── Settings.tsx        # Settings modal
 └── src-tauri/                  # Rust backend
     └── src/
@@ -121,7 +127,7 @@ reslab-torrent-client/
         ├── engine/
         │   └── manager.rs      # TorrentManager wrapping librqbit Session
         ├── commands/
-        │   ├── torrent.rs      # Tauri commands: add, pause, resume, remove, details
+        │   ├── torrent.rs      # Tauri commands: list/confirm/cancel add, pause, resume, remove, details
         │   └── settings.rs     # Tauri commands: get/save settings + TOML I/O
         └── error.rs            # AppError with Tauri-serializable impl
 ```
@@ -130,12 +136,10 @@ reslab-torrent-client/
 
 ## Roadmap
 
-- [ ] Per-file selection (download only chosen files)
 - [ ] Tracker list tab in detail panel
 - [ ] Sequential download mode for streaming
 - [ ] RSS feed / auto-download rules
 - [ ] Code signing for Windows & macOS releases
-- [ ] Dark / light theme toggle
 
 ---
 
@@ -143,12 +147,16 @@ reslab-torrent-client/
 
 Issues and pull requests are welcome. For significant changes please open an issue first to discuss the approach.
 
+CI runs formatting, lint, and tests on every push/PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)); the same checks locally:
+
 ```bash
-# Run type checks
+# Frontend: type check
 npx tsc --noEmit
 
-# Run Rust checks
-cargo clippy --manifest-path src-tauri/Cargo.toml
+# Rust: format, lint, test
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 ---
