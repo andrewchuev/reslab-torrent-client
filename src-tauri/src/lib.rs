@@ -37,11 +37,10 @@ pub fn run() {
         .find(|a| a.to_lowercase().ends_with(".torrent"));
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        // Single-instance: when the app is already running and the user opens a
-        // .torrent file, the OS launches a second process.  The plugin kills that
+        // Single-instance must be the first plugin registered — plugins run in
+        // registration order, and on Windows this one only works correctly as the
+        // first to see argv. When the app is already running and the user opens a
+        // .torrent file, the OS launches a second process; the plugin kills that
         // second process and fires this callback in the *first* instance instead.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -54,6 +53,9 @@ pub fn run() {
                 }
             }
         }))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(manager)
         .setup(move |app| {
             info!("Starting Torrent Client v{}", app.package_info().version);
