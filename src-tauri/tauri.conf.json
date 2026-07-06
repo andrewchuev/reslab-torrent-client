@@ -51,5 +51,10 @@
         "installMode": "perMachine"
       }
     }
+  },
+  "plugins": {
+    "shell": {
+      "open": "([A-Za-z]:|/).+"
+    }
   }
 }
