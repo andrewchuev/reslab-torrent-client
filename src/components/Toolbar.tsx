@@ -2,12 +2,21 @@ import { Component, createSignal } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { TorrentSource } from "../lib/commands";
 import { Theme } from "../lib/theme";
+import {
+  LinkIcon, FilePlusIcon, ClipboardIcon, PlayIcon, PauseIcon, SquareIcon, TrashIcon, TrashDataIcon,
+  SearchIcon, SunIcon, MoonIcon,
+} from "./Icons";
+
+export type GroupAction = "start" | "pause" | "stop" | "remove" | "remove-with-data";
 
 interface Props {
   onAddSource: (source: TorrentSource) => void;
-  onOpenSettings: () => void;
   theme: Theme;
   onToggleTheme: () => void;
+  selectedCount: number;
+  onGroupAction: (action: GroupAction) => void;
+  search: string;
+  onSearchChange: (v: string) => void;
 }
 
 function isTorrentUrl(s: string): boolean {
@@ -76,32 +85,66 @@ const Toolbar: Component<Props> = (props) => {
     if (e.key === "Escape") setShowDialog(false);
   };
 
+  const noSelection = () => props.selectedCount === 0;
+
   return (
     <>
       <div class="toolbar">
         <button class="btn-primary" onClick={openDialog}>
-          + Add Torrent
+          <LinkIcon size={14} /> Add Link
         </button>
         <button class="btn-ghost" onClick={handleOpenFile}>
-          Open File
+          <FilePlusIcon size={14} /> Add File
         </button>
         <button
-          class="btn-ghost btn-clipboard"
+          class="toolbar-icon-btn"
           onClick={handlePasteAndAdd}
           disabled={clipLoading()}
           title="Paste magnet or .torrent URL from clipboard"
         >
-          {clipLoading() ? "…" : "Paste Link"}
+          <ClipboardIcon size={15} />
         </button>
+
+        <div class="toolbar-divider" />
+
+        <div class="toolbar-icon-group">
+          <button class="toolbar-icon-btn" disabled={noSelection()} onClick={() => props.onGroupAction("start")} title="Resume selected">
+            <PlayIcon size={15} />
+          </button>
+          <button class="toolbar-icon-btn" disabled={noSelection()} onClick={() => props.onGroupAction("pause")} title="Pause selected">
+            <PauseIcon size={15} />
+          </button>
+          <button class="toolbar-icon-btn" disabled={noSelection()} onClick={() => props.onGroupAction("stop")} title="Stop selected">
+            <SquareIcon size={13} />
+          </button>
+          <button class="toolbar-icon-btn toolbar-icon-btn-danger" disabled={noSelection()} onClick={() => props.onGroupAction("remove")} title="Remove selected">
+            <TrashIcon size={15} />
+          </button>
+          <button class="toolbar-icon-btn toolbar-icon-btn-danger" disabled={noSelection()} onClick={() => props.onGroupAction("remove-with-data")} title="Remove selected and delete files">
+            <TrashDataIcon size={15} />
+          </button>
+        </div>
+
         <span class="toolbar-spacer" />
+
+        <div class="search-box">
+          <SearchIcon size={14} class="search-icon" />
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Search torrents..."
+            value={props.search}
+            onInput={(e) => props.onSearchChange(e.currentTarget.value)}
+          />
+        </div>
+
         <button
-          class="btn-icon theme-toggle"
+          class="toolbar-icon-btn theme-toggle"
           onClick={props.onToggleTheme}
           title={props.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {props.theme === "dark" ? "☀" : "☾"}
+          {props.theme === "dark" ? <SunIcon size={15} /> : <MoonIcon size={15} />}
         </button>
-        <button class="btn-icon" title="Settings" onClick={props.onOpenSettings}>⚙</button>
       </div>
 
       {showDialog() && (

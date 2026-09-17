@@ -5,7 +5,7 @@ interface Props {
   torrent: TorrentInfo;
 }
 
-type Tab = "files" | "speed";
+type Tab = "files" | "details" | "peers" | "speed";
 
 const MAX_POINTS = 60;
 const DEFAULT_PANEL_HEIGHT = 200;
@@ -233,6 +233,18 @@ const DetailPanel: Component<Props> = (props) => {
           Files {files().length > 0 ? `(${files().length})` : ""}
         </button>
         <button
+          class={`detail-tab${tab() === "details" ? " active" : ""}`}
+          onClick={() => setTab("details")}
+        >
+          Details
+        </button>
+        <button
+          class={`detail-tab${tab() === "peers" ? " active" : ""}`}
+          onClick={() => setTab("peers")}
+        >
+          Peers {(details()?.peers.length ?? 0) > 0 ? `(${details()!.peers.length})` : ""}
+        </button>
+        <button
           class={`detail-tab${tab() === "speed" ? " active" : ""}`}
           onClick={() => setTab("speed")}
         >
@@ -290,6 +302,67 @@ const DetailPanel: Component<Props> = (props) => {
                         </tr>
                       );
                     }}
+                  </For>
+                </tbody>
+              </table>
+            </Show>
+          </Show>
+
+          {/* ── DETAILS TAB ───────────────────────────────────────── */}
+          <Show when={tab() === "details"}>
+            <div class="detail-details-grid">
+              <div class="detail-details-item">
+                <span class="detail-details-label">Save Path</span>
+                <span class="detail-details-value">{details()?.save_path ?? props.torrent.save_path}</span>
+              </div>
+              <div class="detail-details-item">
+                <span class="detail-details-label">Hash</span>
+                <span class="detail-details-value">{props.torrent.info_hash}</span>
+              </div>
+              <div class="detail-details-item">
+                <span class="detail-details-label">Added On</span>
+                <span class="detail-details-value">{new Date(props.torrent.added_at * 1000).toLocaleString()}</span>
+              </div>
+              <div class="detail-details-item">
+                <span class="detail-details-label">Total Size</span>
+                <span class="detail-details-value">{fmtBytes(props.torrent.size_bytes)}</span>
+              </div>
+              <div class="detail-details-item">
+                <span class="detail-details-label">Uploaded</span>
+                <span class="detail-details-value">{fmtBytes(props.torrent.uploaded_bytes)}</span>
+              </div>
+              <div class="detail-details-item">
+                <span class="detail-details-label">Connected Peers</span>
+                <span class="detail-details-value">{props.torrent.peers_connected}</span>
+              </div>
+            </div>
+          </Show>
+
+          {/* ── PEERS TAB ─────────────────────────────────────────── */}
+          <Show when={tab() === "peers"}>
+            <Show
+              when={(details()?.peers.length ?? 0) > 0}
+              fallback={<div class="detail-empty">No peers connected</div>}
+            >
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th class="col-addr">Address</th>
+                    <th class="col-state">State</th>
+                    <th class="col-size">Downloaded</th>
+                    <th class="col-size">Uploaded</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={details()!.peers}>
+                    {(p) => (
+                      <tr>
+                        <td class="col-addr">{p.addr}</td>
+                        <td class="col-state">{p.state}</td>
+                        <td class="col-size">{fmtBytes(p.downloaded_bytes)}</td>
+                        <td class="col-size">{fmtBytes(p.uploaded_bytes)}</td>
+                      </tr>
+                    )}
                   </For>
                 </tbody>
               </table>

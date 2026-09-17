@@ -17,6 +17,7 @@ import {
 } from "./lib/commands";
 import Toolbar from "./components/Toolbar";
 import TorrentRow from "./components/TorrentRow";
+import Sidebar, { StatusFilter } from "./components/Sidebar";
 import Settings from "./components/Settings";
 import DetailPanel from "./components/DetailPanel";
 import FileSelectionDialog from "./components/FileSelectionDialog";
@@ -72,6 +73,8 @@ const App: Component = () => {
   const [lastClickedId, setLastClickedId] = createSignal<string | null>(null);
   const [sortField, setSortField] = createSignal<SortField>("name");
   const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+  const [statusFilter, setStatusFilter] = createSignal<StatusFilter>("all");
+  const [search, setSearch] = createSignal("");
 
   // Torrent-add pipeline: every source (magnet, .torrent file/URL) is first
   // "listed" (metadata resolved, no download started) so the user can pick which
@@ -134,6 +137,18 @@ const App: Component = () => {
       }
     });
     return list;
+  });
+
+  const filteredTorrents = createMemo(() => {
+    const status = statusFilter();
+    const q = search().trim().toLowerCase();
+    return sortedTorrents().filter((t) => {
+      if (status === "downloading" && t.state.type !== "downloading" && t.state.type !== "initializing") return false;
+      if (status === "seeding" && t.state.type !== "seeding") return false;
+      if (status === "completed" && !(t.size_bytes > 0 && t.downloaded_bytes >= t.size_bytes)) return false;
+      if (q && !t.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
   });
 
   // ── Add pipeline: list → (user picks files in dialog) → confirm ──────────
@@ -342,83 +357,91 @@ const App: Component = () => {
     setSelectedIds(new Set<string>());
   };
 
-  const SortBtn: Component<{ field: SortField; label: string }> = (p) => (
-    <button
-      class={`sort-btn${sortField() === p.field ? " active" : ""}`}
-      onClick={() => handleSort(p.field)}
-      title={`Sort by ${p.label}`}
-    >
+  const HeaderCell: Component<{ field: SortField; label: string; class: string }> = (p) => (
+    <button class={`table-header-cell ${p.class}`} onClick={() => handleSort(p.field)}>
       {p.label}
       <Show when={sortField() === p.field}>
-        <span class="sort-arrow">{sortDir() === "asc" ? " ↑" : " ↓"}</span>
+        <span class="sort-arrow">{sortDir() === "asc" ? "↑" : "↓"}</span>
       </Show>
     </button>
   );
 
+  const allSelected = createMemo(() => torrents.length > 0 && selectedIds().size === torrents.length);
+
   return (
     <div class="app">
-      <Toolbar onAddSource={enqueueAdd} onOpenSettings={() => setShowSettings(true)} theme={theme()} onToggleTheme={toggleTheme} />
-      <Show when={showSettings()}>
-        <Settings onClose={() => setShowSettings(false)} />
-      </Show>
-
-      <div class="main-area">
-        <div class="group-toolbar">
-          <span class="group-count">{selectedIds().size} selected</span>
-          <div class="group-toolbar-sep" />
-          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("start")} title="Resume selected">▶ Start</button>
-          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("pause")} title="Pause selected">⏸ Pause</button>
-          <button class="group-btn" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("stop")} title="Stop selected">⏹ Stop</button>
-          <button class="group-btn group-btn-danger" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("remove")} title="Remove selected">✕ Remove</button>
-          <button class="group-btn group-btn-danger" disabled={selectedIds().size === 0} onClick={() => handleGroupAction("remove-with-data")} title="Remove selected and delete files">🗑 Remove + Data</button>
-          <span class="group-toolbar-spacer" />
-          <button class="group-btn" disabled={torrents.length === 0} onClick={handleSelectAll}>Select all</button>
-          <button class="group-btn" disabled={selectedIds().size === 0} onClick={handleDeselectAll}>✕ Clear</button>
-        </div>
-
-        <Show when={torrents.length > 1}>
-          <div class="sort-bar">
-            <span class="sort-label">Sort:</span>
-            <SortBtn field="name" label="Name" />
-            <SortBtn field="status" label="Status" />
-            <SortBtn field="progress" label="Progress" />
-            <SortBtn field="speed" label="Speed" />
-            <SortBtn field="size" label="Size" />
-          </div>
+      <div class="app-body">
+        <Sidebar
+          torrents={torrents}
+          filter={statusFilter()}
+          onFilterChange={setStatusFilter}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+        <Show when={showSettings()}>
+          <Settings onClose={() => setShowSettings(false)} />
         </Show>
 
-        <div class="torrent-list">
-          <Show when={!loading()} fallback={<div class="empty-state">Loading...</div>}>
-            <Show
-              when={sortedTorrents().length > 0}
-              fallback={
-                <div class="empty-state">
-                  <div class="empty-icon">⬇</div>
-                  <div class="empty-title">No torrents yet</div>
-                  <div class="empty-desc">
-                    Click "+ Add Torrent", "Open File", or drop a .torrent file here
+        <div class="main-area">
+          <Toolbar
+            onAddSource={enqueueAdd}
+            theme={theme()}
+            onToggleTheme={toggleTheme}
+            selectedCount={selectedIds().size}
+            onGroupAction={handleGroupAction}
+            search={search()}
+            onSearchChange={setSearch}
+          />
+
+          <div class="table-header">
+            <div class="table-header-cell table-header-name">
+              <input
+                type="checkbox"
+                class="table-header-checkbox"
+                checked={allSelected()}
+                disabled={torrents.length === 0}
+                onClick={(e) => { e.stopPropagation(); allSelected() ? handleDeselectAll() : handleSelectAll(); }}
+              />
+              <HeaderCell field="name" label="Name" class="table-header-name-label" />
+            </div>
+            <HeaderCell field="size" label="Size" class="table-header-size" />
+            <HeaderCell field="speed" label="Down / Up" class="table-header-speed" />
+            <div class="table-header-cell table-header-eta">ETA</div>
+            <HeaderCell field="progress" label="Progress" class="table-header-progress" />
+          </div>
+
+          <div class="torrent-list">
+            <Show when={!loading()} fallback={<div class="empty-state">Loading...</div>}>
+              <Show
+                when={filteredTorrents().length > 0}
+                fallback={
+                  <div class="empty-state">
+                    <div class="empty-icon">⬇</div>
+                    <div class="empty-title">No torrents yet</div>
+                    <div class="empty-desc">
+                      {torrents.length === 0
+                        ? 'Click "Add Link", "Add File", or drop a .torrent file here'
+                        : "No torrents match the current filter"}
+                    </div>
                   </div>
-                </div>
-              }
-            >
-              <For each={sortedTorrents()}>
-                {(torrent) => (
-                  <TorrentRow
-                    torrent={torrent}
-                    selected={selectedIds().has(torrent.id)}
-                    onSelect={(e) => handleRowClick(torrent, e)}
-                    onUpdate={handleUpdate}
-                    onRemove={handleRemove}
-                  />
-                )}
-              </For>
+                }
+              >
+                <For each={filteredTorrents()}>
+                  {(torrent) => (
+                    <TorrentRow
+                      torrent={torrent}
+                      selected={selectedIds().has(torrent.id)}
+                      onSelect={(e) => handleRowClick(torrent, e)}
+                    />
+                  )}
+                </For>
+              </Show>
             </Show>
+          </div>
+
+          <Show when={selectedTorrent() !== null}>
+            <DetailPanel torrent={selectedTorrent()!} />
           </Show>
         </div>
-
-        <Show when={selectedTorrent() !== null}>
-          <DetailPanel torrent={selectedTorrent()!} />
-        </Show>
       </div>
 
       <div class="statusbar">
@@ -429,7 +452,10 @@ const App: Component = () => {
           <span class="statusbar-info">{infoMsg()}</span>
         </Show>
         <Show when={!dropError() && !infoMsg()}>
-          <span>{torrents.length} torrent{torrents.length !== 1 ? "s" : ""}</span>
+          <span>
+            <Show when={selectedIds().size > 0}>{selectedIds().size} selected · </Show>
+            {torrents.length} torrent{torrents.length !== 1 ? "s" : ""}
+          </span>
         </Show>
         <span class="statusbar-spacer" />
         <div class="zoom-controls">
