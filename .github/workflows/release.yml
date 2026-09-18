@@ -88,4 +88,5 @@ jobs:
             > On Windows, SmartScreen may warn about unknown publisher — click "More info" → Run anyway.
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || true }}
           prerelease: false
+          retryAttempts: 3
           args: ${{ matrix.args }}
